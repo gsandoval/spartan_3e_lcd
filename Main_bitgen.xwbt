@@ -1,0 +1,8 @@
+INTSTYLE=ise
+INFILE=C:\Users\darchitect\Documents\workspaces\fpga\hitachi_lcd\Main.ncd
+OUTFILE=C:\Users\darchitect\Documents\workspaces\fpga\hitachi_lcd\Main.bit
+FAMILY=Spartan3E
+PART=xc3s500e-4fg320
+WORKINGDIR=C:\Users\darchitect\Documents\workspaces\fpga\hitachi_lcd
+LICENSE=WebPack
+USER_INFO=__0_0_0
