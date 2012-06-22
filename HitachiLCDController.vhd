@@ -54,12 +54,12 @@ architecture Behavioral of HitachiLCDController is
 	type send_byte is (setup_high_nibble, send_high_nibble, nibble_separation, setup_low_nibble, 
 		send_low_nibble, finish, idle);
 		
-	type write_state is (idle, clearing, moving, writing);
+	type write_state is (idle, clearing, moving, writing, waiting);
 	
 	signal write_fsm : write_state := idle;
 	
 	signal init_fsm : init_state := waiting;
-	signal init_nibble : std_logic_vector(3 downto 0);
+	signal init_nibble : std_logic;
 	signal init_enabled : std_logic;
 	signal configuring : std_logic := '1';
 	
@@ -86,7 +86,7 @@ begin
 	rs <= config_register_select when display_ready = '0' else register_select;
 	rw <= '0';
 	
-	db <= init_nibble when configuring = '1' else data_nibble;
+	db <= ("001" & init_nibble) when configuring = '1' else data_nibble;
 	enabled <= init_enabled when configuring = '1' else data_enabled;
 	send_byte_request <= send_config_byte_request when display_ready = '0' else send_request;
 	curr_byte <= config_byte_to_send when display_ready = '0' else byte_to_send;
@@ -96,11 +96,11 @@ begin
 	begin
 		if reset = '1' then
 			counter := 0;
-			request_served <= '1';
 		elsif rising_edge(mclock) and display_ready = '1' then
+			request_served <= '0';
+			send_request <= '0';
 			case write_fsm is
 				when idle =>
-					request_served <= '0';
 					counter := 0;
 					if clear = '1' then
 						write_fsm <= clearing;
@@ -118,24 +118,23 @@ begin
 						byte_to_send <= data;
 						send_request <= '1';
 					end if;
-				when clearing =>				
+				when clearing =>
 					if byte_sent = '1' then
-						send_request <= '0';
 						counter := 0;
+						write_fsm <= waiting;
 					end if;
-					if send_request = '0' and counter > 82000 then
+				when waiting =>
+					if counter > 82000 then
 						write_fsm <= idle;
 						request_served <= '1';
 					end if;
 				when moving =>
 					if byte_sent = '1' then
-						send_request <= '0';
 						write_fsm <= idle;
 						request_served <= '1';
 					end if;
 				when writing =>
 					if byte_sent = '1' then
-						send_request <= '0';
 						write_fsm <= idle;
 						request_served <= '1';
 					end if;
@@ -145,10 +144,10 @@ begin
 		end if;
 	end process;
 	
-	initialization : process(reset, mclock)
+	init : process(reset, mclock)
 		variable counter : integer range 0 to 760000;
 		variable times_sent_number_three : integer range 0 to 3;
-		variable wait_time : integer;
+		variable wait_time : integer range 2000 to 205000;
 	begin
 		if reset = '1' then
 			configuring <= '1';
@@ -164,7 +163,7 @@ begin
 						times_sent_number_three := 0;
 					end if;
 				when send_three =>
-					init_nibble <= "0011";
+					init_nibble <= '1';
 					times_sent_number_three := times_sent_number_three + 1;
 					init_enabled <= '1';
 					if counter > 100 then
@@ -188,7 +187,7 @@ begin
 						counter := 0;
 					end if;
 				when conf_four_bits => -- We're working with 4 bits
-					init_nibble <= "0010";
+					init_nibble <= '0';
 					init_enabled <= '1';
 					if counter = 12 then
 						init_fsm <= wait_after_bits;
@@ -216,47 +215,36 @@ begin
 			config_fsm <= function_set;
 			config_register_select <= '0';
 		elsif rising_edge(mclock) and configuring = '0' and display_ready = '0' then
+			send_config_byte_request <= '0';
+			config_register_select <= '0';
 			case config_fsm is
 				when function_set => 
-					config_register_select <= '0';
 					config_byte_to_send <= "00101000";
 					send_config_byte_request <= '1';
-					if counter > 1 then
-						send_config_byte_request <= '0';
-						if byte_sent = '1' then
-							config_fsm <= entry_mode_set;
-							counter := 0;
-						end if;
+					if byte_sent = '1' then
+						config_fsm <= entry_mode_set;
+						counter := 0;
 					end if;
 				when entry_mode_set =>
 					config_byte_to_send <= "00000110";
 					send_config_byte_request <= '1';
-					if counter > 1 then
-						send_config_byte_request <= '0';
-						if byte_sent = '1' then
-							config_fsm <= set_display;
-							counter := 0;
-						end if;
+					if byte_sent = '1' then
+						config_fsm <= set_display;
+						counter := 0;
 					end if;
 				when set_display =>
 					config_byte_to_send <= "00001100"; --0x0C
 					send_config_byte_request <= '1';
-					if counter > 1 then
-						send_config_byte_request <= '0';
-						if byte_sent = '1' then
-							config_fsm <= display_clear;
-							counter := 0;
-						end if;
+					if byte_sent = '1' then
+						config_fsm <= display_clear;
+						counter := 0;
 					end if;
 				when display_clear =>
 					config_byte_to_send <= "00000001";
 					send_config_byte_request <= '1';
-					if counter > 1 then
-						send_config_byte_request <= '0';
-						if byte_sent = '1' then
-							config_fsm <= finish;
-							counter := 0;
-						end if;
+					if byte_sent = '1' then
+						config_fsm <= finish;
+						counter := 0;
 					end if;
 				when finish =>
 					if counter > 82000 then
@@ -271,22 +259,24 @@ begin
 	
 	send_bytes : process(reset, mclock, send_byte_request)
 		variable counter : integer range 0 to 2500 := 1;
+		variable data_tmp : std_logic_vector(7 downto 0);
 	begin
 		if reset = '1' then
 			send_byte_fsm <= idle;
 			counter := 1;
 			data_enabled <= '0';
 		elsif rising_edge(mclock) and configuring = '0' then
+			byte_sent <= '0';
 			case send_byte_fsm is
 				when idle =>
 					if send_byte_request = '1' then
+						data_tmp := curr_byte;
 						send_byte_fsm <= setup_high_nibble;
-						byte_sent <= '0';
 						counter := 0;
 						data_enabled <= '0';
 					end if;
 				when setup_high_nibble => -- 40ns
-					data_nibble <= curr_byte(7 downto 4);
+					data_nibble <= data_tmp(7 downto 4);
 					if counter = 2 then
 						send_byte_fsm <= send_high_nibble;
 						counter := 0;
@@ -304,7 +294,7 @@ begin
 						send_byte_fsm <= setup_low_nibble;
 					end if;
 				when setup_low_nibble =>
-					data_nibble <= curr_byte(3 downto 0);
+					data_nibble <= data_tmp(3 downto 0);
 					if counter = 2 then
 						send_byte_fsm <= send_low_nibble;
 						counter := 0;

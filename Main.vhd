@@ -48,7 +48,7 @@ architecture Behavioral of Main is
 	signal data, goto : std_logic_vector(7 downto 0);
 	signal data_request, clear, goto_request, request_served, display_ready : std_logic;
 	
-	type send_fsm is (start, clearscr, move, send, idle);
+	type send_fsm is (start, clearscr, move1, move2, idle, send1, send2);
 	
 	signal fsm : send_fsm := start;
 	
@@ -75,7 +75,8 @@ begin
 	
 	test : process(reset, mclock, request_served)
 		variable counter : integer range 0 to 50000000 := 1;
-		variable message : string(1 to 11) := "Hola mundo.";
+		constant line1 : string(1 to 11) := "Hola mundo.";
+		constant line2 : string(1 to 7) := "World 4";
 		variable letter_index : integer := 0;
 	begin
 		if reset = '1' then
@@ -86,34 +87,56 @@ begin
 				when start =>
 					if display_ready = '1' then
 						counter := 0;
-						fsm <= move;
+						fsm <= move1;
 					end if;
---				when clearscr =>
---					if counter = 1 then
---						clear <= '1';
---					elsif request_served = '1' then
---						clear <= '0';
---						fsm <= move;
---						counter := 0;
---					end if;
-				when move =>
+				when clearscr =>
 					if counter = 1 then
-						goto <= "10000000";
+						clear <= '1';
+					elsif request_served = '1' then
+						clear <= '0';
+						fsm <= move1;
+						counter := 0;
+					end if;
+				when move1 =>
+					if counter = 1 then
+						goto <= "10000011";
 						goto_request <= '1';
 					elsif request_served = '1' then
 						goto_request <= '0';
-						fsm <= send;
+						fsm <= send1;
 						counter := 0;
 					end if;
-				when send =>
+				when send1 =>
 					if counter = 1 then
 						letter_index := letter_index + 1;
-						data <= conv_std_logic_vector(character'pos(message(letter_index)), 8);
+						data <= conv_std_logic_vector(character'pos(line1(letter_index)), 8);
 						data_request <= '1';
 					elsif request_served = '1' then
 						data_request <= '0';
 						counter := 0;
-						if letter_index = message'length then
+						if letter_index = line1'length then
+							fsm <= move2;
+						end if;
+					end if;
+				when move2 =>
+					if counter = 1 then
+						goto <= "11000101";
+						goto_request <= '1';
+					elsif request_served = '1' then
+						goto_request <= '0';
+						fsm <= send2;
+						counter := 0;
+						letter_index := 0;
+					end if;
+				when send2 =>
+					if counter = 1 then
+						letter_index := letter_index + 1;
+						data <= conv_std_logic_vector(character'pos(line2(letter_index)), 8);
+						data_request <= '1';
+					elsif request_served = '1' then
+						data_request <= '0';
+						counter := 0;
+						if letter_index = line2'length then
 							fsm <= idle;
 						end if;
 					end if;
